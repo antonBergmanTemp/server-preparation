@@ -32,8 +32,7 @@ fi
 # Step 2: Update and install essential packages
 echo "Updating system packages..."
 export DEBIAN_FRONTEND=noninteractive
-apt update
-apt upgrade -y -o Dpkg::Options::="--force-confold"
+apt update && apt upgrade -y -o Dpkg::Options::="--force-confold"
 apt install -y curl wget nano
 
 # Step 3: Choose SSH port or generate random
