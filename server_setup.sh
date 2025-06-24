@@ -7,17 +7,24 @@
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
-# Function to display progress bar
+# Function to display dynamic progress bar
 show_progress() {
     local msg=$1
-    local duration=$2
+    local max_steps=$2
+    local delay=$3
     echo -n "$msg ["
-    for ((i=0; i<10; i++)); do
-        echo -n "="
-        sleep "$duration"
+    for ((i=0; i<max_steps; i++)); do
+        local percent=$(( (i + 1) * 100 / max_steps ))
+        local filled=$(( (i + 1) * 20 / max_steps ))
+        local empty=$(( 20 - filled ))
+        printf "\r$msg [%${filled}s%${empty}s] %d%%" "$(printf '#%.0s' $(seq 1 $filled))" "" "$percent"
+        sleep "$delay"
     done
-    echo "] Done"
+    echo -e "\r$msg [####################] 100% Done"
 }
+
+# Log file for debugging
+LOG_FILE="/tmp/server_setup.log"
 
 clear
 echo "============================================================="
@@ -40,9 +47,12 @@ fi
 
 # Step 2: Update and install essential packages
 echo "Updating system packages..."
-show_progress "Installing updates" 0.3
-apt update &>/dev/null && apt upgrade -y &>/dev/null
-apt install -y curl wget nano &>/dev/null
+export DEBIAN_FRONTEND=noninteractive
+show_progress "Installing updates" 10 0.5
+apt update >> "$LOG_FILE" 2>&1
+# Use -o Dpkg::Options::="--force-confold" to keep existing configs (e.g., sshd_config)
+apt upgrade -y -o Dpkg::Options::="--force-confold" >> "$LOG_FILE" 2>&1
+apt install -y curl wget nano >> "$LOG_FILE" 2>&1
 
 # Step 3: Choose SSH port or generate random
 while true; do
@@ -70,33 +80,33 @@ if [[ -z "$ssh_key" ]]; then
 fi
 
 echo "Configuring SSH..."
-show_progress "Setting up SSH" 0.2
-mkdir -p /root/.ssh &>/dev/null
+show_progress "Setting up SSH" 5 0.3
+mkdir -p /root/.ssh >> "$LOG_FILE" 2>&1
 echo "$ssh_key" >> /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys &>/dev/null
-chmod 700 /root/.ssh &>/dev/null
+chmod 600 /root/.ssh/authorized_keys >> "$LOG_FILE" 2>&1
+chmod 700 /root/.ssh >> "$LOG_FILE" 2>&1
 
 # Update SSH configuration to replace default port (22)
-sed -i "s/#Port 22/Port $ssh_port/" /etc/ssh/sshd_config &>/dev/null
-sed -i "s/Port 22/Port $ssh_port/" /etc/ssh/sshd_config &>/dev/null
-sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config &>/dev/null
-sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config &>/dev/null
-systemctl daemon-reload &>/dev/null
-systemctl restart ssh.socket &>/dev/null
+sed -i "s/#Port 22/Port $ssh_port/" /etc/ssh/sshd_config >> "$LOG_FILE" 2>&1
+sed -i "s/Port 22/Port $ssh_port/" /etc/ssh/sshd_config >> "$LOG_FILE" 2>&1
+sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config >> "$LOG_FILE" 2>&1
+sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config >> "$LOG_FILE" 2>&1
+systemctl daemon-reload >> "$LOG_FILE" 2>&1
+systemctl restart ssh.socket >> "$LOG_FILE" 2>&1
 
 # Step 5: Install and configure UFW
 echo "Configuring UFW firewall..."
-show_progress "Setting up UFW" 0.2
-apt install -y ufw &>/dev/null
-ufw allow "$ssh_port"/tcp &>/dev/null
-ufw --force enable &>/dev/null
+show_progress "Setting up UFW" 5 0.3
+apt install -y ufw >> "$LOG_FILE" 2>&1
+ufw allow "$ssh_port"/tcp >> "$LOG_FILE" 2>&1
+ufw --force enable >> "$LOG_FILE" 2>&1
 
 # Step 6: Install and configure Fail2ban
 echo "Configuring Fail2ban..."
-show_progress "Setting up Fail2ban" 0.2
-apt install -y fail2ban &>/dev/null
-systemctl enable fail2ban &>/dev/null
-systemctl start fail2ban &>/dev/null
+show_progress "Setting up Fail2ban" 5 0.3
+apt install -y fail2ban >> "$LOG_FILE" 2>&1
+systemctl enable fail2ban >> "$LOG_FILE" 2>&1
+systemctl start fail2ban >> "$LOG_FILE" 2>&1
 
 # Create Fail2ban SSH jail configuration
 cat << EOF > /etc/fail2ban/jail.d/sshd.conf
@@ -107,17 +117,17 @@ maxretry = 3
 findtime = 600
 bantime = 3600
 EOF
-systemctl restart fail2ban &>/dev/null
+systemctl restart fail2ban >> "$LOG_FILE" 2>&1
 
 # Step 7: Disable IPv6
 echo "Disabling IPv6..."
-show_progress "Disabling IPv6" 0.2
+show_progress "Disabling IPv6" 3 0.2
 cat << EOF >> /etc/sysctl.conf
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-sysctl -p &>/dev/null
+sysctl -p >> "$LOG_FILE" 2>&1
 
 # Step 8: Completion prompt
 clear
@@ -131,4 +141,5 @@ echo -e "${GREEN}- UFW enabled${NC}"
 echo -e "${GREEN}- Fail2ban protecting SSH${NC}"
 echo -e "${GREEN}- IPv6 disabled${NC}"
 echo -e "${GREEN}You can now proceed with Zapret and Marzban installation.${NC}"
+echo -e "${GREEN}Debug logs available at: $LOG_FILE${NC}"
 echo -e "${GREEN}=============================================================${NC}"
